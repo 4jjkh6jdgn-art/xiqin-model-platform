@@ -1,0 +1,165 @@
+services:
+  # ===================== Infrastructure =====================
+  postgres:
+    image: postgres:16-alpine
+    container_name: xiqin-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xiqin
+      POSTGRES_USER: xiqin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xiqin_dev_2024}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - xiqin-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: xiqin-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-xiqin_redis_2024}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - xiqin-net
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: xiqin-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-xiqin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-xiqin_mq_2024}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - xiqin-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: xiqin-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-xiqin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-xiqin_minio_2024}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - xiqin-net
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: xiqin-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      for i in 1 2 3 4 5 6 7 8 9 10; do
+        if mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-xiqin} ${MINIO_ROOT_PASSWORD:-xiqin_minio_2024}; then
+          break;
+        fi;
+        echo 'Waiting for MinIO... attempt '$$i;
+        sleep 3;
+      done;
+      mc mb local/models --ignore-existing;
+      mc mb local/thumbnails --ignore-existing;
+      mc mb local/avatars --ignore-existing;
+      mc anonymous set download local/thumbnails;
+      echo 'MinIO buckets initialized';
+      "
+    networks:
+      - xiqin-net
+
+  # ===================== Backend =====================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: xiqin-backend
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+      - minio
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/xiqin
+      SPRING_DATASOURCE_USERNAME: xiqin
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-xiqin_dev_2024}
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD:-xiqin_redis_2024}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-xiqin}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-xiqin_mq_2024}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-xiqin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-xiqin_minio_2024}
+      JWT_SECRET: ${JWT_SECRET:-xiqin_jwt_secret_key_2024_secure}
+    ports:
+      - "8080:8080"
+    networks:
+      - xiqin-net
+
+  # ===================== Worker =====================
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: xiqin-worker
+    restart: unless-stopped
+    depends_on:
+      - rabbitmq
+      - minio
+      - postgres
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-xiqin}:${RABBITMQ_PASSWORD:-xiqin_mq_2024}@rabbitmq:5672
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-xiqin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-xiqin_minio_2024}
+      DB_URL: jdbc:postgresql://postgres:5432/xiqin
+      DB_USER: xiqin
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-xiqin_dev_2024}
+      BACKEND_URL: http://backend:8080
+    volumes:
+      - worker_tmp:/tmp/worker
+    networks:
+      - xiqin-net
+
+  # ===================== Frontend =====================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: xiqin-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - xiqin-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  minio_data:
+  worker_tmp:
+
+networks:
+  xiqin-net:
+    driver: bridge

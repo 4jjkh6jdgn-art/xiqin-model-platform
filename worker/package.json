@@ -1,0 +1,25 @@
+{
+  "name": "xiqin-model-worker",
+  "version": "1.0.0",
+  "description": "Model conversion worker for Xiqin Model Management Platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "amqplib": "^0.10.4",
+    "axios": "^1.7.9",
+    "canvas": "^2.11.2",
+    "fflate": "^0.8.2",
+    "gl": "^6.0.2",
+    "minio": "^8.0.3",
+    "three": "0.150.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.150.1"
+  }
+}

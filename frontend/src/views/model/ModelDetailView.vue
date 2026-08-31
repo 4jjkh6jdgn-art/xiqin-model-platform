@@ -1,0 +1,1060 @@
+<template>
+  <div class="model-detail" v-loading="loading">
+    <header v-if="model" class="detail-command-bar">
+      <el-button class="back-button" text @click="goBack">
+        <el-icon><ArrowLeft /></el-icon><span>返回</span>
+      </el-button>
+
+      <div class="detail-context" aria-label="当前模型与版本">
+        <el-tag :type="statusType(model.status)" size="small" class="status-tag">
+          {{ statusText(model.status) }}
+        </el-tag>
+        <strong class="detail-title" :title="model.name">{{ model.name || '模型详情' }}</strong>
+        <el-select
+          :model-value="selectedVersion"
+          size="small"
+          class="version-select"
+          popper-class="model-version-popper"
+          aria-label="选择模型版本"
+          @change="selectVersion"
+        >
+          <el-option
+            v-for="item in versions"
+            :key="item.versionNum"
+            :label="`v${item.versionNum}${item.versionNum === model.defaultVersion ? ' · 默认' : ''}`"
+            :value="item.versionNum"
+          >
+            <div class="version-option">
+              <span>v{{ item.versionNum }}</span>
+              <span v-if="item.versionNum === model.defaultVersion" class="version-default-state">当前默认</span>
+              <el-button
+                v-else
+                v-permission="'model:default_version_manage'"
+                link
+                type="primary"
+                size="small"
+                class="version-default-action"
+                @mousedown.stop.prevent
+                @click.stop.prevent="setDefaultVersion(item.versionNum)"
+              >默认显示</el-button>
+            </div>
+          </el-option>
+        </el-select>
+      </div>
+
+      <div class="detail-actions">
+        <el-button v-permission="'model:feedback'" size="small" class="model-feedback" @click="openModelFeedback">
+          <el-icon><ChatDotRound /></el-icon>问题反馈
+        </el-button>
+        <el-button v-permission="'model:upload'" size="small" type="primary" plain class="version-update" @click="showNewVersion = true">
+          <el-icon><Upload /></el-icon>更新
+        </el-button>
+      </div>
+    </header>
+
+    <div v-if="model" class="detail-workspace">
+      <main class="preview-stack">
+        <div class="viewer-wrapper">
+          <ModelViewer
+            ref="viewerRef"
+            v-if="displayFileUrl"
+            :model-url="displayFileUrl"
+            :texture-files="textureFiles"
+            :texture-flip-y="textureFlipY"
+            :format="displayFileFormat"
+            :initial-camera="model?.cameraView"
+            :initial-lighting="model?.lighting"
+            @loaded="onViewerLoaded"
+            @lighting-change="onLightingChange"
+          />
+          <div v-else class="viewer-empty">
+            <el-empty :description="model.status === 'processing' ? '模型处理中，请稍后刷新...' : '暂无可预览的模型文件'" />
+          </div>
+        </div>
+
+        <el-card shadow="never" class="file-card">
+          <template #header>
+            <div class="card-header">
+              <span>模型文件（{{ model.files?.length || 0 }}）</span>
+              <div class="file-header-actions">
+                <el-button v-permission="'model:upload'" size="small" @click="openAddFiles"><el-icon><Plus /></el-icon>&nbsp;添加文件</el-button>
+                <el-button v-permission="'model:download'" class="model-download" type="primary" plain size="small" @click="handleDownload" :loading="downloading" :disabled="!model.files?.length">
+                  <el-icon><Download /></el-icon>&nbsp;下载 v{{ selectedVersion }} ZIP
+                </el-button>
+              </div>
+            </div>
+          </template>
+          <div class="file-list file-tree-wrap">
+            <el-tree v-if="model.files?.length" :data="fileTree" node-key="key" default-expand-all :expand-on-click-node="false" class="asset-file-tree">
+              <template #default="{ data }">
+                <div class="tree-node" :class="{ 'tree-folder': data.folder }">
+                  <div class="tree-main"><el-icon :color="data.folder ? '#2d9577' : fileColor(data.file)"><FolderOpened v-if="data.folder"/><Document v-else/></el-icon><span :title="data.label">{{ data.label }}</span><span v-if="data.folder" class="group-count">{{ data.fileCount }}</span><span v-else class="file-format">{{ (data.file?.fileFormat || '').toUpperCase() }}</span></div>
+                  <div v-if="data.file" class="file-actions"><span class="file-size">{{ formatSize(data.file.fileSize) }}</span><div class="file-action-buttons"><el-button v-if="canPreviewMedia(data.file.fileName, data.file.mimeType)" size="small" text type="primary" @click.stop="openMediaPreview(data.file)">查看</el-button><el-button v-permission="'model:download'" size="small" text type="primary" @click.stop="downloadFile(data.file)">下载</el-button><el-button v-permission="'model:file_edit'" size="small" text @click.stop="openFileEditor(data.file)">编辑</el-button><el-button v-permission="'model:file_delete'" size="small" text type="danger" @click.stop="confirmDeleteFile(data.file)">删除</el-button></div></div>
+                </div>
+              </template>
+            </el-tree>
+            <el-empty v-if="!model.files?.length" description="暂无文件" :image-size="60" />
+          </div>
+        </el-card>
+      </main>
+
+      <aside class="asset-rail">
+        <el-card shadow="never" class="asset-panel asset-info-panel">
+          <template #header>
+            <div class="asset-panel-heading">
+              <div class="asset-panel-title">
+                <span>资产信息</span>
+                <em class="asset-update-dot"></em>
+                <small class="asset-update-time">更新于 {{ formatTime(model.updatedAt) }}</small>
+              </div>
+              <span class="asset-version-tag">v{{ selectedVersion }}</span>
+            </div>
+          </template>
+          <div class="asset-relations">
+            <div class="asset-relation-row">
+              <span class="asset-label">模型分类</span>
+              <div class="relation-tags">
+                <el-tag v-for="item in model.categories || []" :key="item.id" size="small" effect="plain" type="primary">{{ item.name }}</el-tag>
+                <strong v-if="!model.categories?.length" class="relation-empty">未分类</strong>
+              </div>
+            </div>
+            <div class="asset-relation-row">
+              <span class="asset-label">关联项目</span>
+              <div class="relation-tags">
+                <el-tag v-for="item in model.projects || []" :key="item.id" size="small" type="success" effect="plain">{{ item.name }}</el-tag>
+                <strong v-if="!model.projects?.length" class="relation-empty">未关联</strong>
+              </div>
+            </div>
+          </div>
+          <div class="asset-metrics">
+            <div class="asset-metric">
+              <span>当前查看</span>
+              <strong>v{{ selectedVersion }}</strong>
+            </div>
+            <div class="asset-metric">
+              <span>资料大小</span>
+              <strong>{{ model.fileSize ? formatSize(model.fileSize) : '-' }}</strong>
+            </div>
+          </div>
+          <div v-if="model.description" class="asset-description">{{ model.description }}</div>
+        </el-card>
+
+        <el-card shadow="never" class="asset-panel thumbnail-panel">
+          <template #header>
+            <div class="thumbnail-manager-title">
+              <div class="thumbnail-manager-heading">
+                <span>缩略图管理</span>
+                <small class="thumbnail-count">共 {{ thumbnailCandidates.length }} 张</small>
+              </div>
+              <el-button
+                v-if="thumbnailCandidates.length > 1"
+                v-permission="'model:thumbnail_manage'"
+                class="thumbnail-clear"
+                size="small"
+                text
+                type="danger"
+                :loading="clearingThumbnails"
+                @click="clearUnusedThumbnails"
+              >删除全部</el-button>
+            </div>
+          </template>
+          <div class="thumbnail-manager">
+            <div
+              v-if="thumbnailCandidates.length"
+              class="thumbnail-grid"
+              :class="{ 'is-single': thumbnailCandidates.length === 1, 'is-pair': thumbnailCandidates.length === 2 }"
+            >
+              <div
+                v-for="candidate in thumbnailCandidates"
+                :key="candidate.id ?? candidate.url"
+                class="thumbnail-option"
+                :class="{ active: isSelectedThumbnail(candidate) }"
+                :title="candidate.fileName || '缩略图'"
+                role="button"
+                tabindex="0"
+                @click="canManageThumbnail && chooseThumbnail(candidate)"
+                @keyup.enter="canManageThumbnail && chooseThumbnail(candidate)"
+              >
+                <img :src="candidate.url" :alt="candidate.fileName || '缩略图'" />
+                <button
+                  v-permission="'model:thumbnail_manage'"
+                  type="button"
+                  class="thumbnail-delete"
+                  :class="{ disabled: isSelectedThumbnail(candidate) || !candidate.id }"
+                  :disabled="isSelectedThumbnail(candidate) || !candidate.id || thumbnailBusyId !== null"
+                  :title="isSelectedThumbnail(candidate) ? '正在使用的缩略图不能删除' : '删除缩略图'"
+                  @click.stop="deleteThumbnail(candidate)"
+                >
+                  <el-icon><Delete /></el-icon>
+                </button>
+                <span v-if="isSelectedThumbnail(candidate)" class="thumbnail-current">当前</span>
+                <span v-if="thumbnailBusyId !== null && thumbnailBusyId === candidate.id" class="thumbnail-loading">切换中</span>
+              </div>
+            </div>
+            <button v-else v-permission="'model:thumbnail_manage'" type="button" class="thumbnail-empty" @click="setThumbnail">
+              <el-icon><Picture /></el-icon>
+              <span>从当前视角截取第一张缩略图</span>
+            </button>
+            <div class="thumbnail-hint">点击缩略图切换主图；当前主图受保护，切换后才能删除</div>
+          </div>
+        </el-card>
+
+        <el-card shadow="never" class="asset-panel record-panel">
+          <div class="record-section">
+            <el-tabs v-model="activeTab" class="asset-tabs">
+              <el-tab-pane label="版本历史" name="versions">
+                <el-table :data="versions" stripe size="small" class="version-table" @row-click="handleVersionRowClick">
+                  <el-table-column prop="versionNum" label="版本" width="72">
+                    <template #default="{ row }">v{{ row.versionNum }}</template>
+                  </el-table-column>
+                  <el-table-column prop="changeLog" label="变更说明" min-width="112" />
+                  <el-table-column label="创建时间" min-width="146">
+                    <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+                  </el-table-column>
+                </el-table>
+              </el-tab-pane>
+              <el-tab-pane v-if="canViewHistory" label="修改记录" name="modifications">
+                <el-table :data="modifications" stripe size="small">
+                  <el-table-column prop="action" label="操作" width="72">
+                    <template #default="{ row }">{{ actionText(row.action) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="fieldName" label="字段" min-width="90" />
+                  <el-table-column prop="oldValue" label="旧值" min-width="110" />
+                  <el-table-column prop="newValue" label="新值" min-width="110" />
+                  <el-table-column label="时间" min-width="146">
+                    <template #default="{ row }">{{ formatTime(row.createdAt) }}</template>
+                  </el-table-column>
+                </el-table>
+              </el-tab-pane>
+            </el-tabs>
+          </div>
+        </el-card>
+      </aside>
+    </div>
+
+    <el-dialog v-model="feedbackVisible" title="模型问题反馈" width="520px">
+      <el-alert title="反馈将发送到管理员站内信箱" type="info" :closable="false" show-icon />
+      <el-form label-position="top" class="model-feedback-form">
+        <el-form-item label="反馈对象"><el-input :model-value="model?.name" disabled /></el-form-item>
+        <el-form-item label="问题说明">
+          <el-input v-model="feedbackContent" type="textarea" :rows="5" maxlength="500" show-word-limit placeholder="请描述模型、贴图、预览或资料方面的问题" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="feedbackVisible = false">取消</el-button>
+        <el-button v-permission="'model:feedback'" type="primary" :disabled="!feedbackContent.trim()" @click="submitModelFeedback">提交反馈</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="fileEditVisible"
+      :title="editingFile?.fileType === 'texture' ? '编辑贴图名称' : '编辑文件名称'"
+      width="440px"
+      destroy-on-close
+    >
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="文件名称">
+          <el-input
+            v-model="editingFileBaseName"
+            maxlength="200"
+            show-word-limit
+            autofocus
+            @keyup.enter="saveFileName"
+          >
+            <template v-if="editingFileExtension" #append>.{{ editingFileExtension }}</template>
+          </el-input>
+        </el-form-item>
+        <el-alert
+          v-if="editingFile?.fileType === 'texture'"
+          title="保存后会按新名称重新匹配模型材质，文件格式保持不变"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+      </el-form>
+      <template #footer>
+        <el-button @click="fileEditVisible = false">取消</el-button>
+        <el-button
+          v-permission="'model:file_edit'"
+          type="primary"
+          :loading="fileSaving"
+          :disabled="!editingFileBaseName.trim()"
+          @click="saveFileName"
+        >保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="addFilesVisible" title="向当前版本添加文件" width="620px" destroy-on-close>
+      <el-alert :title="`文件将添加到 ${model?.name || '模型'} / v${selectedVersion}，并保留选择时的目录层级`" type="info" :closable="false" show-icon />
+      <el-form label-position="top" class="add-files-form">
+        <el-form-item label="添加到目录">
+          <el-select v-model="addTargetPath" filterable allow-create default-first-option style="width:100%" placeholder="根目录">
+            <el-option label="根目录" value=""/><el-option v-for="path in folderOptions" :key="path" :label="path" :value="path"/>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="选择资料">
+          <div class="add-file-buttons"><el-button @click="addFileInput?.click()"><el-icon><Plus /></el-icon>添加文件</el-button><el-button @click="addFolderInput?.click()"><el-icon><FolderOpened /></el-icon>添加文件夹</el-button></div>
+          <input ref="addFileInput" class="hidden-input" type="file" multiple @change="handleAddFileSelection" />
+          <input ref="addFolderInput" class="hidden-input" type="file" webkitdirectory directory multiple @change="handleAddFolderSelection" />
+        </el-form-item>
+      </el-form>
+      <div v-if="pendingAddFiles.length" class="pending-add-list"><div v-for="(item,index) in pendingAddFiles" :key="`${item.path}-${index}`"><span>{{ item.path }}</span><em>{{ formatSize(item.file.size) }}</em></div></div>
+      <el-empty v-else description="请选择要添加的文件或文件夹" :image-size="60"/>
+      <template #footer><el-button @click="addFilesVisible=false">取消</el-button><el-button type="primary" :loading="addingFiles" :disabled="!pendingAddFiles.length" @click="submitAddFiles">确认添加</el-button></template>
+    </el-dialog>
+
+    <MediaPreviewDialog
+      v-model="mediaPreviewVisible"
+      :source="mediaPreviewUrl"
+      :file-name="mediaPreviewFile?.fileName"
+      :media-type="mediaPreviewType"
+      :loading="mediaPreviewLoading"
+      :error="mediaPreviewError"
+      @download="downloadFile(mediaPreviewFile)"
+    />
+
+    <QuickUploadDialog
+      v-model="showNewVersion"
+      :update-model="model"
+      @success="handleVersionUploaded"
+    />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { modelApi } from '@/api/model'
+import { notificationApi } from '@/api/index-modules'
+import { useAuthStore } from '@/stores/auth'
+import ModelViewer from '@/components/viewer/ModelViewer.vue'
+import QuickUploadDialog from '@/components/upload/QuickUploadDialog.vue'
+import MediaPreviewDialog from '@/components/media/MediaPreviewDialog.vue'
+import { classifyModelFile, materialTextureFiles } from '@/utils/modelFileRules'
+import { canPreviewMedia, getMediaPreviewType, type MediaPreviewType } from '@/utils/mediaPreview'
+
+const route = useRoute()
+const router = useRouter()
+const authStore = useAuthStore()
+const goBack = () => {
+  const target = typeof route.query.returnTo === 'string' && route.query.returnTo.startsWith('/') ? route.query.returnTo : ''
+  if (target) router.push(target)
+  else router.back()
+}
+const canViewHistory = computed(() => authStore.hasPermission('model:history_view'))
+const canManageThumbnail = computed(() => authStore.hasPermission('model:thumbnail_manage'))
+const modelId = Number(route.params.id)
+const model = ref<any>(null)
+const loading = ref(false)
+const activeTab = ref('versions')
+const viewerRef = ref<any>(null)
+const versions = ref<any[]>([])
+const modifications = ref<any[]>([])
+const showNewVersion = ref(false)
+const thumbnailBusyId = ref<number | null>(null)
+const clearingThumbnails = ref(false)
+const selectedVersion = ref(Number(route.query.version) || 1)
+const downloading = ref(false)
+const feedbackVisible = ref(false)
+const feedbackContent = ref('')
+const fileEditVisible = ref(false)
+const editingFile = ref<any>(null)
+const editingFileBaseName = ref('')
+const editingFileExtension = ref('')
+const fileSaving = ref(false)
+const addFilesVisible = ref(false)
+const addFileInput = ref<HTMLInputElement>()
+const addFolderInput = ref<HTMLInputElement>()
+const addTargetPath = ref('')
+const pendingAddFiles = ref<Array<{ file: File; path: string; kind: string }>>([])
+const addingFiles = ref(false)
+const mediaPreviewVisible = ref(false)
+const mediaPreviewFile = ref<any>(null)
+const mediaPreviewUrl = ref('')
+const mediaPreviewType = ref<MediaPreviewType>('image')
+const mediaPreviewLoading = ref(false)
+const mediaPreviewError = ref('')
+
+const openModelFeedback = () => {
+  feedbackContent.value = ''
+  feedbackVisible.value = true
+}
+
+const submitModelFeedback = async () => {
+  await notificationApi.createFeedback({
+    sourceType: 'model',
+    sourceId: modelId,
+    projectId: model.value?.projectId,
+    title: `${model.value?.name || '模型'}的问题反馈`,
+    content: feedbackContent.value.trim(),
+  })
+  feedbackVisible.value = false
+  ElMessage.success('反馈已提交至管理员站内信箱')
+}
+
+const thumbnailCandidates = computed(() => {
+  const candidates = [...(model.value?.thumbnailCandidates || [])]
+  if (model.value?.thumbnailUrl && !model.value?.thumbnailCandidateId) {
+    candidates.unshift({
+      id: null,
+      url: model.value.thumbnailUrl,
+      fileName: '当前缩略图',
+      legacy: true,
+    })
+  }
+  return candidates
+})
+
+const isSelectedThumbnail = (candidate: any) => {
+  if (model.value?.thumbnailCandidateId) return candidate.id === model.value.thumbnailCandidateId
+  return candidate.id == null && candidate.url === model.value?.thumbnailUrl
+}
+
+const selectedDisplayFile = computed(() => {
+  const files = (model.value?.files || []).filter((file: any) => file.fileType === 'display' && file.url)
+  const preferredUrl = model.value?.displayFileUrl
+  return files.find((file: any) => file.url === preferredUrl)
+    || files.sort((a: any, b: any) => {
+      const aPreferred = /^(glb|gltf)$/i.test(a.fileFormat || '') ? 0 : 1
+      const bPreferred = /^(glb|gltf)$/i.test(b.fileFormat || '') ? 0 : 1
+      return aPreferred - bPreferred
+    })[0]
+    || null
+})
+
+const displayFileUrl = computed(() => model.value?.displayFileUrl || selectedDisplayFile.value?.url || null)
+
+const displayFileFormat = computed(() => {
+  const declaredFormat = selectedDisplayFile.value?.fileFormat
+    || selectedDisplayFile.value?.fileName?.split('.').pop()
+  if (declaredFormat) return declaredFormat.toLowerCase()
+  const url = displayFileUrl.value || ''
+  const ext = url.split('.').pop()?.split('?')[0]?.toLowerCase()
+  return ext || null
+})
+
+const textureFiles = computed(() => {
+  const textures = (model.value?.files || [])
+    .filter((f: any) => f.fileType === 'texture' && f.url)
+    .map((f: any) => ({ url: f.url, fileName: f.fileName || '' }))
+  return materialTextureFiles(textures)
+})
+
+const textureFlipY = computed(() => {
+  const sourceFiles = (model.value?.files || []).filter((file: any) => file.fileType === 'display')
+  // Worker 将 FBX/OBJ 转为 GLB 时保留源模型 UV；外部贴图仍需沿用源格式的 Y 轴方向。
+  return sourceFiles.some((file: any) => /^(fbx|obj)$/i.test(file.fileFormat || ''))
+})
+
+const fileGroups = computed(() => {
+  const files = model.value?.files || []
+  const groups = [
+    { type: 'display', label: '模型文件', color: '#67c23a', files: [] as any[] },
+    { type: 'texture', label: '材质贴图', color: '#e6a23c', files: [] as any[] },
+    { type: 'reference', label: '参考图片', color: '#8b5cf6', files: [] as any[] },
+    { type: 'other', label: '其他文件', color: '#909399', files: [] as any[] },
+  ]
+  files.forEach((f: any) => {
+    const g = groups.find(x => x.type === f.fileType) || groups[3]
+    g.files.push(f)
+  })
+  return groups
+})
+
+const normalizeTreePath = (value: string) => (value || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+const fileTree = computed(() => {
+  const root: any = { key: 'root', label: model.value?.name || '模型资料', folder: true, children: [], fileCount: 0 }
+  for (const file of model.value?.files || []) {
+    let parts = normalizeTreePath(file.filePath || file.fileName).split('/').filter(Boolean)
+    if (parts[0] === model.value?.name) parts = parts.slice(1)
+    if (!parts.length) parts = [file.fileName]
+    let parent = root
+    parts.forEach((part: string, index: number) => {
+      const isFile = index === parts.length - 1
+      if (isFile) {
+        parent.children.push({ key: `file-${file.id}`, label: file.fileName || part, folder: false, file })
+      } else {
+        const key = `${parent.key}/${part}`
+        let folder = parent.children.find((node: any) => node.folder && node.label === part)
+        if (!folder) { folder = { key, label: part, folder: true, children: [], fileCount: 0 }; parent.children.push(folder) }
+        parent = folder
+      }
+    })
+  }
+  const countFiles = (node: any): number => {
+    if (!node.folder) return 1
+    node.fileCount = (node.children || []).reduce((sum: number, child: any) => sum + countFiles(child), 0)
+    return node.fileCount
+  }
+  countFiles(root)
+  return [root]
+})
+
+const folderOptions = computed(() => {
+  const values = new Set<string>()
+  for (const file of model.value?.files || []) {
+    const path = normalizeTreePath(file.filePath || file.fileName)
+    const parts = path.split('/').filter(Boolean)
+    parts.pop()
+    for (let index = 1; index <= parts.length; index++) values.add(parts.slice(0, index).join('/'))
+  }
+  return Array.from(values).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+})
+
+const fileColor = (file: any) => ({ display: '#22c55e', texture: '#f59e0b', reference: '#8b5cf6', other: '#94a3b8' } as any)[file?.fileType] || '#94a3b8'
+const joinPath = (...parts: string[]) => parts.map(normalizeTreePath).filter(Boolean).join('/')
+const openAddFiles = () => { pendingAddFiles.value = []; addTargetPath.value = ''; addFilesVisible.value = true }
+const addPending = (files: File[], preserveFolders: boolean) => {
+  pendingAddFiles.value.push(...files.filter(file => !file.name.startsWith('.')).map(file => {
+    const sourcePath = preserveFolders ? ((file as any).webkitRelativePath || file.name) : file.name
+    const path = joinPath(addTargetPath.value, sourcePath)
+    return { file, path, kind: classifyModelFile(path).kind }
+  }))
+}
+const handleAddFileSelection = (event: Event) => { const input = event.target as HTMLInputElement; addPending(Array.from(input.files || []), false); input.value = '' }
+const handleAddFolderSelection = (event: Event) => { const input = event.target as HTMLInputElement; addPending(Array.from(input.files || []), true); input.value = '' }
+const submitAddFiles = async () => {
+  if (!pendingAddFiles.value.length || addingFiles.value) return
+  addingFiles.value = true
+  const data = new FormData()
+  pendingAddFiles.value.forEach(item => data.append('files', item.file, item.file.name))
+  data.append('filePaths', JSON.stringify(pendingAddFiles.value.map(item => item.path)))
+  data.append('fileTypes', JSON.stringify(Object.fromEntries(pendingAddFiles.value.map(item => [item.path, item.kind]))))
+  try {
+    await modelApi.addVersionFiles(modelId, selectedVersion.value, data)
+    addFilesVisible.value = false
+    await Promise.all([loadModel(), loadModifications()])
+    ElMessage.success(`已向 v${selectedVersion.value} 添加 ${pendingAddFiles.value.length} 个文件`)
+  } finally { addingFiles.value = false }
+}
+
+const loadModel = async () => {
+  loading.value = true
+  try {
+    const res = await modelApi.getModel(modelId, selectedVersion.value)
+    model.value = res.data
+  } finally {
+    loading.value = false
+  }
+}
+
+const refreshAll = async () => {
+  await loadModel()
+  if (viewerRef.value?.refresh) {
+    viewerRef.value.refresh()
+  }
+}
+
+const loadVersions = async () => {
+  const res = await modelApi.getVersions(modelId)
+  versions.value = res.data
+}
+
+const selectVersion = async (value: number) => {
+  const version = Number(value)
+  if (!version || !versions.value.some(item => item.versionNum === version)) return
+  selectedVersion.value = version
+  await router.replace({ query: { ...route.query, version: String(version) } })
+  await loadModel()
+}
+
+const setDefaultVersion = async (version = selectedVersion.value) => {
+  if (version === model.value?.defaultVersion) return
+  await modelApi.setDefaultVersion(modelId, version)
+  model.value.defaultVersion = version
+  ElMessage.success(`v${version} 已设为默认显示版本`)
+}
+
+const handleVersionRowClick = (row: any) => selectVersion(row.versionNum)
+
+const loadModifications = async () => {
+  if (!canViewHistory.value) return
+  const res = await modelApi.getModificationRecords(modelId, { page: 0, size: 50 })
+  modifications.value = res.data.list
+}
+
+const handleDownload = async () => {
+  if (downloading.value) return
+  downloading.value = true
+  try {
+    const res = await modelApi.downloadModelArchive(modelId, selectedVersion.value)
+    const blob = res.data instanceof Blob ? res.data : new Blob([res.data], { type: 'application/zip' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${model.value?.name || 'model'}_v${selectedVersion.value}.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    ElMessage.success(`v${selectedVersion.value} 原始资料已打包下载`)
+  } finally {
+    downloading.value = false
+  }
+}
+
+const downloadFile = async (file: any) => {
+  if (!file) return
+  const res = await modelApi.downloadFile(file.id)
+  if (res.data?.url) window.open(res.data.url, '_blank')
+}
+
+const openMediaPreview = (file: any) => {
+  const type = getMediaPreviewType(file?.fileName, file?.mimeType)
+  if (!type) return
+  mediaPreviewFile.value = file
+  mediaPreviewType.value = type
+  mediaPreviewUrl.value = file?.url || `/api/models/files/${file.id}/raw`
+  mediaPreviewError.value = file?.id ? '' : '预览地址获取失败，请下载原文件查看'
+  mediaPreviewLoading.value = false
+  mediaPreviewVisible.value = true
+}
+
+const splitFileName = (name: string) => {
+  const dot = name.lastIndexOf('.')
+  return dot > 0
+    ? { base: name.slice(0, dot), extension: name.slice(dot + 1) }
+    : { base: name, extension: '' }
+}
+
+const openFileEditor = (file: any) => {
+  const { base, extension } = splitFileName(file.fileName || '')
+  editingFile.value = file
+  editingFileBaseName.value = base
+  editingFileExtension.value = extension
+  fileEditVisible.value = true
+}
+
+const saveFileName = async () => {
+  const file = editingFile.value
+  const baseName = editingFileBaseName.value.trim()
+  if (!file || !baseName || fileSaving.value) return
+
+  const nextName = editingFileExtension.value
+    ? `${baseName}.${editingFileExtension.value}`
+    : baseName
+  if (nextName === file.fileName) {
+    fileEditVisible.value = false
+    return
+  }
+
+  fileSaving.value = true
+  try {
+    await modelApi.renameFile(file.id, nextName)
+    fileEditVisible.value = false
+    await Promise.all([loadModel(), loadModifications()])
+    ElMessage.success(file.fileType === 'texture' ? '贴图名称已更新' : '文件名称已更新')
+  } finally {
+    fileSaving.value = false
+  }
+}
+
+const confirmDeleteFile = async (file: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `删除“${file.fileName}”后无法恢复，是否继续？`,
+      '删除模型文件',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  await modelApi.deleteFile(file.id)
+  await Promise.all([loadModel(), loadModifications()])
+  ElMessage.success('文件已删除')
+}
+
+const handleVersionUploaded = async (version: any) => {
+  showNewVersion.value = false
+  await loadVersions()
+  const nextVersion = Number(version?.versionNum || versions.value[0]?.versionNum || 1)
+  await selectVersion(nextVersion)
+}
+
+const onViewerLoaded = () => { /* stats handled inside viewer */ }
+
+const saveInitialView = async () => {
+  if (!viewerRef.value) return
+  const state = viewerRef.value.getCameraState()
+  await modelApi.updateSceneConfig(modelId, { cameraView: JSON.stringify(state) })
+  ElMessage.success('初始视角已保存')
+}
+
+const setThumbnail = async () => {
+  if (!viewerRef.value) return
+  const dataUrl = viewerRef.value.captureScreenshot()
+  if (!dataUrl) return ElMessage.error('截图失败')
+  // dataURL -> blob -> file
+  const res = await fetch(dataUrl)
+  const blob = await res.blob()
+  const file = new File([blob], `${model.value?.name || 'model'}_${Date.now()}.png`, { type: 'image/png' })
+  await modelApi.uploadThumbnail(modelId, file)
+  ElMessage.success('已保存新的缩略图并设为主图')
+  await loadModel()
+}
+
+const chooseThumbnail = async (candidate: any) => {
+  if (!candidate.id || isSelectedThumbnail(candidate) || thumbnailBusyId.value !== null) return
+  thumbnailBusyId.value = candidate.id
+  try {
+    await modelApi.selectThumbnail(modelId, candidate.id)
+    await loadModel()
+    ElMessage.success('主缩略图已切换')
+  } finally {
+    thumbnailBusyId.value = null
+  }
+}
+
+const deleteThumbnail = async (candidate: any) => {
+  if (!candidate.id || isSelectedThumbnail(candidate) || thumbnailBusyId.value !== null) return
+  try {
+    await ElMessageBox.confirm('删除后无法恢复，确认删除这张缩略图吗？', '删除缩略图', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+  thumbnailBusyId.value = candidate.id
+  try {
+    await modelApi.deleteThumbnail(modelId, candidate.id)
+    await loadModel()
+    ElMessage.success('缩略图已删除')
+  } finally {
+    thumbnailBusyId.value = null
+  }
+}
+
+const clearUnusedThumbnails = async () => {
+  const removable = thumbnailCandidates.value.filter(candidate => candidate.id && !isSelectedThumbnail(candidate))
+  if (!removable.length) {
+    ElMessage.info('当前缩略图受保护，没有可删除的图片')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将删除其余 ${removable.length} 张缩略图，当前正在使用的主图会保留。是否继续？`,
+      '删除全部未使用缩略图',
+      {
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  clearingThumbnails.value = true
+  try {
+    await Promise.all(removable.map(candidate => modelApi.deleteThumbnail(modelId, candidate.id)))
+    await loadModel()
+    ElMessage.success(`已删除 ${removable.length} 张未使用缩略图`)
+  } finally {
+    clearingThumbnails.value = false
+  }
+}
+
+const onLightingChange = async (lightingJson: string) => {
+  await modelApi.updateSceneConfig(modelId, { lighting: lightingJson })
+  ElMessage.success('灯光配置已保存')
+}
+
+const statusText = (s: string) => ({
+  draft: '草稿', processing: '处理中', ready: '可用', archived: '已归档', error: '处理失败'
+}[s] || s)
+
+const statusType = (s: string) => ({
+  draft: 'info', processing: 'warning', ready: 'success', archived: 'info', error: 'danger'
+}[s] || 'info')
+
+const actionText = (a: string) => ({
+  create: '创建', update: '更新', delete: '删除', status_change: '状态变更', version_bump: '版本升级'
+}[a] || a)
+
+const formatTime = (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-'
+const formatSize = (bytes: number) => {
+  if (!bytes) return '-'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0, size = bytes
+  while (size >= 1024 && i < units.length - 1) { size /= 1024; i++ }
+  return `${size.toFixed(1)} ${units[i]}`
+}
+
+onMounted(async () => {
+  await loadVersions()
+  const requestedVersion = Number(route.query.version)
+  const hasRequestedVersion = versions.value.some(item => item.versionNum === requestedVersion)
+  if (hasRequestedVersion) {
+    selectedVersion.value = requestedVersion
+    await loadModel()
+  } else {
+    const res = await modelApi.getModel(modelId)
+    model.value = res.data
+    selectedVersion.value = Number(res.data.defaultVersion || res.data.version || versions.value[0]?.versionNum || 1)
+  }
+  await router.replace({ query: { ...route.query, version: String(selectedVersion.value) } })
+  await loadModifications()
+})
+</script>
+
+<style scoped>
+.model-detail { padding: 4px; }
+.detail-page-header { margin-bottom: 20px; }
+.detail-page-header :deep(.el-page-header__title) { color: #64748b; font-weight: 500; }
+.detail-page-header :deep(.el-page-header__content) { display: flex; align-items: center; min-width: 0; }
+.detail-title { max-width: 320px; overflow: hidden; color: #1e293b; font-size: 18px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.status-tag { margin-left: 12px; }
+.version-select { width: 122px; margin-left: 8px; }
+.version-select :deep(.el-select__wrapper) { min-height: 25px; border-radius: 7px; box-shadow: 0 0 0 1px #b9dfd2 inset; }
+.version-option { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.version-default-state { color: #1f8067; font-size: 11px; font-weight: 600; }
+.version-default-action { height: 24px; padding: 0; font-size: 11px; }
+.version-update { margin-left: 8px; }
+.model-feedback { margin-left: 8px; }
+.model-feedback-form { margin-top: 16px; }
+.detail-main { align-items: flex-start; }
+.preview-column { min-width: 0; }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.viewer-wrapper {
+  height: 656px;
+  overflow: hidden;
+  background: #071326;
+  border: 1px solid rgba(148, 163, 184, .2);
+  border-radius: 18px;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, .14);
+}
+.viewer-wrapper :deep(.viewer-toolbar-left .toolbar-label) { margin-left: 3px; font-size: 10px; }
+.viewer-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.asset-panel { margin-bottom: 16px; }
+.asset-panel-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.asset-panel-title { display: flex; align-items: center; gap: 8px; min-width: 0; color: #1e293b; font-size: 16px; font-weight: 700; }
+.asset-panel-title > span { flex-shrink: 0; }
+.asset-update-dot { width: 6px; height: 6px; flex-shrink: 0; background: #1f8067; border-radius: 50%; }
+.asset-update-time { color: #94a3b8; font-size: 12px; font-weight: 400; }
+.asset-version-tag { flex-shrink: 0; min-width: 30px; padding: 3px 8px; color: #1f8067; background: #eff9f5; border: 1px solid #dff2eb; border-radius: 999px; font-size: 10px; font-weight: 650; text-align: center; }
+.asset-relations { display: flex; flex-direction: column; gap: 13px; }
+.asset-relation-row { min-width: 0; display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: start; gap: 10px; }
+.asset-label { padding-top: 4px; color: #94a3b8; font-size: 11px; line-height: 1.4; }
+.relation-tags { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.relation-tags .el-tag { max-width: 100%; border-radius: 6px; }
+.relation-tags .el-tag--primary { color: #1f8067; background: #eff9f5; border-color: #dff2eb; }
+.relation-tags .el-tag--success { color: #1f8067; background: #eff9f5; border-color: #dff2eb; }
+.relation-tags .el-tag :deep(.el-tag__content) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relation-empty { padding-top: 3px; color: #94a3b8; font-size: 12px; font-weight: 500; }
+.asset-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.asset-metric { min-width: 0; padding: 11px 12px; background: #f6faf8; border: 1px solid #edf2f7; border-radius: 10px; }
+.asset-metric span { display: block; margin-bottom: 5px; color: #94a3b8; font-size: 10px; }
+.asset-metric strong { display: block; overflow: hidden; color: #1e293b; font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.asset-description { margin-top: 14px; padding-top: 12px; border-top: 1px solid #eef2f7; color: #64748b; font-size: 12px; line-height: 1.6; }
+.record-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid #eef2f7; }
+.asset-tabs :deep(.el-tabs__header) { margin-bottom: 12px; }
+.asset-tabs :deep(.el-tabs__item) { height: 38px; padding: 0 10px; font-size: 13px; }
+.asset-tabs :deep(.el-tabs__item.is-active) { font-weight: 650; }
+.asset-tabs :deep(.el-table) { width: 100%; font-size: 12px; }
+.asset-tabs :deep(.el-table__inner-wrapper) { overflow-x: auto; }
+.asset-tabs :deep(.el-table th.el-table__cell),
+.asset-tabs :deep(.el-table td.el-table__cell) { padding: 7px 0; }
+.thumbnail-manager { margin-top: 16px; padding-top: 14px; border-top: 1px solid #eef2f7; }
+.thumbnail-manager-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; color: #334155; font-size: 12px; font-weight: 600; }
+.thumbnail-manager-title small { color: #94a3b8; font-size: 10px; font-weight: 500; }
+.thumbnail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 154px; overflow-y: auto; padding: 1px; }
+.thumbnail-grid.is-single { grid-template-columns: minmax(118px, 148px); }
+.thumbnail-grid.is-pair { grid-template-columns: repeat(2, minmax(110px, 148px)); }
+.thumbnail-option { position: relative; overflow: hidden; padding: 0; aspect-ratio: 4 / 3; background: #0b1729; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.thumbnail-option:hover { border-color: #9bcfbe; transform: translateY(-1px); }
+.thumbnail-option.active { border-color: #1f8067; box-shadow: 0 0 0 2px rgba(35, 139, 112, .12); }
+.thumbnail-option img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.thumbnail-delete { position: absolute; z-index: 2; top: 4px; right: 4px; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; color: #fff; background: rgba(15, 23, 42, .76); border: 1px solid rgba(255, 255, 255, .2); border-radius: 6px; cursor: pointer; opacity: 0; transition: opacity .18s, background .18s; }
+.thumbnail-option:hover .thumbnail-delete, .thumbnail-delete:focus-visible { opacity: 1; }
+.thumbnail-delete:hover:not(:disabled) { background: rgba(220, 38, 38, .92); }
+.thumbnail-delete.disabled { cursor: not-allowed; opacity: .45; }
+.thumbnail-current, .thumbnail-loading { position: absolute; right: 4px; bottom: 4px; padding: 2px 5px; color: #fff; background: rgba(35, 139, 112, .9); border-radius: 5px; font-size: 9px; }
+.thumbnail-loading { inset: 0; display: grid; place-items: center; background: rgba(7, 19, 38, .68); border-radius: 0; }
+.thumbnail-empty { width: 100%; min-height: 64px; display: flex; align-items: center; justify-content: center; gap: 7px; color: #64748b; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 9px; cursor: pointer; font-size: 11px; }
+.thumbnail-empty:hover { color: #1f8067; border-color: #62b599; background: #eff9f5; }
+.thumbnail-hint { margin-top: 8px; color: #a1aab8; font-size: 10px; line-height: 1.5; }
+.model-download { margin-left: auto; }
+.file-header-actions { display: flex; align-items: center; gap: 7px; }.file-header-actions .el-button { margin-left: 0; }
+.file-card { max-height: 480px; display: flex; flex-direction: column; }
+.file-list { overflow-y: auto; max-height: 420px; }
+.file-group { margin-bottom: 8px; }
+.file-group-title { display: flex; align-items: center; gap: 6px; padding: 6px 0; color: #606266; border-bottom: 1px dashed #ebeef5; font-size: 12px; font-weight: 600; }
+.group-dot { width: 8px; height: 8px; border-radius: 50%; }
+.group-count { color: #c0c4cc; font-weight: normal; }
+.file-item { display: flex; justify-content: space-between; align-items: center; padding: 7px 0 7px 14px; border-bottom: 1px solid #f5f7fa; }
+.file-item:last-child { border-bottom: none; }
+.file-info { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.file-type-icon { flex-shrink: 0; }
+.file-name { max-width: 150px; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.file-format { flex-shrink: 0; padding: 1px 4px; color: #909399; background: #f5f7fa; border-radius: 3px; font-size: 11px; }
+.file-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.file-size { color: #909399; font-size: 12px; }
+.file-action-buttons { display: flex; align-items: center; flex-shrink: 0; }
+.file-action-buttons .el-button { min-height: 24px; margin-left: 0; padding: 4px; font-size: 11px; }
+.file-tree-wrap { padding: 2px 0; }.asset-file-tree { background: transparent; }.asset-file-tree :deep(.el-tree-node__content) { min-height: 38px; height: auto; border-bottom: 1px solid #f1f5f9; }.asset-file-tree :deep(.el-tree-node__content:hover) { background: #f5faf8; }.tree-node { min-width: 0; width: calc(100% - 4px); display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }.tree-main { min-width: 0; display: flex; align-items: center; gap: 6px; }.tree-main > span:nth-child(2) { min-width: 0; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.tree-folder > .tree-main { color: #334155; font-weight: 650; }.pending-add-list { max-height: 260px; overflow-y: auto; border: 1px solid #e5eaf1; border-radius: 10px; }.pending-add-list > div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 12px; border-bottom: 1px solid #eef2f6; font-size: 12px; }.pending-add-list > div:last-child { border-bottom: 0; }.pending-add-list span { min-width: 0; overflow: hidden; color: #334155; text-overflow: ellipsis; white-space: nowrap; }.pending-add-list em { flex: 0 0 auto; color: #94a3b8; font-style: normal; }.add-files-form { margin-top: 15px; }.add-file-buttons { display: flex; gap: 8px; }.hidden-input { display: none; }
+.model-detail :global(.model-version-popper) { min-width: 188px !important; }.model-detail :global(.model-version-popper .el-select-dropdown__item) { height: 44px; padding: 0 14px; line-height: 44px; }.model-detail :global(.model-version-popper .version-default-action) { min-width: 68px; min-height: 30px; padding: 0 9px; border: 1px solid #b9dfd2; border-radius: 7px; }
+.version-table :deep(.el-table__row) { cursor: pointer; }
+
+/* 宽屏模型工作台：顶部命令栏、主预览、右侧资产栏和下方记录区保持同一视觉网格。 */
+.model-detail { padding: 0; }
+.detail-command-bar {
+  position: relative;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.back-button {
+  justify-self: start;
+  padding-left: 0;
+  color: #64748b;
+  font-weight: 500;
+}
+.back-button:hover { color: #1f8067; }
+.detail-context {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+}
+.detail-title {
+  max-width: min(30vw, 360px);
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-tag { margin-left: 0; }
+.version-select { width: 122px; margin-left: 0; }
+.detail-actions {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.detail-actions .el-button { margin-left: 0; }
+.version-update, .model-feedback { margin-left: 0; border-radius: 8px; }
+.detail-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 2.08fr) minmax(370px, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+.preview-stack, .asset-rail { min-width: 0; }
+.preview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.asset-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.viewer-wrapper {
+  height: clamp(560px, 72vh, 656px);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, .12);
+}
+.asset-panel, .file-card {
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, .9);
+  border-radius: 16px;
+  box-shadow: 0 12px 34px rgba(15, 23, 42, .06);
+}
+.asset-panel { margin-bottom: 0; }
+.asset-panel :deep(.el-card__header),
+.file-card :deep(.el-card__header) {
+  padding: 18px 20px;
+  color: #1e293b;
+  font-size: 16px;
+  font-weight: 700;
+  border-bottom-color: #edf2f7;
+}
+.asset-panel :deep(.el-card__body) { padding: 18px 20px 16px; }
+.asset-info-panel :deep(.el-card__header) { padding: 15px 18px; }
+.asset-info-panel :deep(.el-card__body) { padding: 14px 18px 16px; }
+.asset-info-panel .asset-relations { gap: 10px; }
+.asset-info-panel .asset-metrics { margin-top: 12px; }
+.thumbnail-panel :deep(.el-card__header) { padding: 14px 18px; }
+.thumbnail-panel :deep(.el-card__body) { padding: 12px 18px 14px; }
+.thumbnail-panel .thumbnail-manager { margin: 0; padding: 0; border-top: 0; }
+.thumbnail-panel .thumbnail-manager-title { margin: 0; }
+.thumbnail-panel .thumbnail-grid { max-height: 150px; }
+.record-panel :deep(.el-card__body) { padding: 4px 18px 12px; }
+.record-panel .record-section { margin: 0; padding: 0; border-top: 0; }
+.record-panel .asset-tabs :deep(.el-tabs__header) { margin-bottom: 8px; }
+.asset-summary { gap: 16px 24px; }
+.asset-summary-item span { margin-bottom: 5px; color: #94a3b8; font-size: 11px; }
+.asset-summary-item strong { color: #334155; font-size: 13px; }
+.thumbnail-manager { margin-top: 16px; padding-top: 14px; }
+.thumbnail-manager-title { margin-bottom: 10px; }
+.thumbnail-manager-heading { display: flex; align-items: baseline; gap: 8px; }
+.thumbnail-clear { min-height: 24px; padding: 2px 0; font-size: 11px; }
+.thumbnail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  max-height: 166px;
+}
+.thumbnail-option { border-radius: 7px; }
+.thumbnail-hint { margin-top: 7px; line-height: 1.4; }
+.file-card {
+  min-height: 320px;
+  max-height: clamp(360px, 52vh, 560px);
+  display: flex;
+  flex-direction: column;
+}
+.file-card :deep(.el-card__body) {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  padding: 12px 18px 16px;
+}
+.file-list { width: 100%; max-height: none; overflow-y: auto; padding-right: 3px; }
+.file-name { max-width: clamp(120px, 13vw, 240px); }
+.model-download { min-width: 112px; border-radius: 8px; }
+@media (max-width: 1280px) {
+  .detail-workspace { grid-template-columns: minmax(0, 1fr); }
+  .asset-rail { display: flex; flex-direction: column; }
+  .viewer-wrapper { height: min(680px, 68vh); }
+  .file-name { max-width: 128px; }
+}
+
+@media (max-width: 960px) {
+  .detail-command-bar { grid-template-columns: 1fr auto; }
+  .detail-context { grid-column: 1 / -1; grid-row: 1; justify-self: center; }
+  .back-button { grid-column: 1; grid-row: 2; }
+  .detail-actions { grid-column: 2; grid-row: 2; }
+  .viewer-wrapper { height: min(640px, 66vh); }
+  .file-card { max-height: 500px; }
+}
+
+@media (max-width: 680px) {
+  .detail-command-bar { grid-template-columns: 1fr; }
+  .detail-context { position: static; grid-column: 1; justify-self: stretch; justify-content: flex-start; }
+  .back-button { grid-column: 1; grid-row: 2; }
+  .detail-actions { grid-column: 1; grid-row: 2; }
+  .detail-title { max-width: 44vw; }
+  .viewer-wrapper { min-height: 460px; height: 58vh; }
+}
+/* 模型详情页去掉左侧自定义工具按钮后，将 viewer 自带工具按钮靠左，与目标效果一致 */
+.model-detail :deep(.viewer-toolbar-center) {
+  left: 0;
+  transform: none;
+}
+</style>
