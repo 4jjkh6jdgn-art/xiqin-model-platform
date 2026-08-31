@@ -13,6 +13,7 @@ RUN mvn package -DskipTests -B
 # Runtime stage - 使用Debian镜像避免Alpine musl libc的DNS解析问题
 FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
+RUN mkdir -p /data && chmod 777 /data
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-Xmx256m", "-Xms128m", "-jar", "app.jar", "--spring.profiles.active=docker"]
