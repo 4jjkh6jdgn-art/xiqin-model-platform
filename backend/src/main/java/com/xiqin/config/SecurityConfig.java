@@ -52,7 +52,8 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(Arrays.stream(allowedOrigins.split(","))
+        // 使用allowedOriginPatterns而非allowedOrigins，支持*通配符与allowCredentials共存
+        config.setAllowedOriginPatterns(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim).filter(origin -> !origin.isEmpty()).toList());
         config.setAllowedMethods(Arrays.stream(allowedMethods.split(","))
                 .map(String::trim).filter(method -> !method.isEmpty()).toList());
