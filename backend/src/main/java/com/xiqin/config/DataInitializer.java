@@ -36,10 +36,32 @@ public class DataInitializer implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        // Ensure system roles exist (for H2/embedded DB without Flyway)
+        Role adminRole = roleRepository.findByCode("admin")
+                .orElseGet(() -> {
+                    Role role = Role.builder()
+                            .name("系统管理员")
+                            .code("admin")
+                            .description("拥有所有权限")
+                            .isSystem(true)
+                            .build();
+                    return roleRepository.save(role);
+                });
+
+        roleRepository.findByCode("leader")
+                .orElseGet(() -> roleRepository.save(Role.builder()
+                        .name("组长").code("leader")
+                        .description("项目组长，可审批注册申请")
+                        .isSystem(true).build()));
+
+        roleRepository.findByCode("member")
+                .orElseGet(() -> roleRepository.save(Role.builder()
+                        .name("组员").code("member")
+                        .description("普通组员")
+                        .isSystem(true).build()));
+
         // Ensure admin user exists with correct password
         if (userRepository.findByUsername(adminUsername).isEmpty()) {
-            Role adminRole = roleRepository.findByCode("admin")
-                    .orElseThrow(() -> new RuntimeException("Admin role not found in DB"));
             User admin = User.builder()
                     .username(adminUsername)
                     .email(adminEmail)
