@@ -11,9 +11,9 @@ spring:
 
   datasource:
     # Render部署：硬编码Supabase连接池（IPv4可用），环境变量不再覆盖
-    url: jdbc:postgresql://aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres?sslmode=require
-    username: postgres.ulsqkrfswnthpjaarymw
-    password: Iuy7t6RgJ93BUrah
+    url: jdbc:postgresql://aws-0-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require
+    username: postgres.gvxlfghnhxhrtaeefsmp
+    password: Xm8jNBKZZ1YQkjle
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
