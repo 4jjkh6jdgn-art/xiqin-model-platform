@@ -16,4 +16,4 @@ WORKDIR /app
 RUN mkdir -p /data && chmod 777 /data
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
-ENTRYPOINT ["java", "-Xmx256m", "-Xms128m", "-jar", "app.jar", "--spring.profiles.active=docker"]
+ENTRYPOINT ["java", "-Xmx256m", "-Xms128m", "-jar", "app.jar", "--spring.profiles.active=docker", "--spring.datasource.url=jdbc:h2:file:/data/xiqin;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=PostgreSQL", "--spring.datasource.username=sa", "--spring.datasource.password=", "--spring.datasource.driver-class-name=org.h2.Driver", "--spring.jpa.hibernate.ddl-auto=update", "--spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.H2Dialect", "--spring.flyway.enabled=false"]
