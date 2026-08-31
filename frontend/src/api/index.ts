@@ -2,8 +2,21 @@ import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 
+// 支持通过构建时环境变量指定后端地址（Render等PaaS平台部署用）
+// VITE_API_BASE_URL 可以是完整URL（https://xxx.onrender.com/api）或主机名（xxx.onrender.com）
+const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
+let apiBaseUrl = '/api'
+if (rawBase && rawBase.trim()) {
+  const trimmed = rawBase.trim()
+  if (trimmed.startsWith('http')) {
+    apiBaseUrl = trimmed
+  } else {
+    apiBaseUrl = `https://${trimmed}/api`
+  }
+}
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseUrl,
   timeout: 60000,
 })
 

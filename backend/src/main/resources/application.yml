@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${PORT:8080}
   servlet:
     context-path: /api
 
@@ -10,9 +10,10 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:dev}
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/xiqin}
-    username: ${SPRING_DATASOURCE_USERNAME:xiqin}
-    password: ${SPRING_DATASOURCE_PASSWORD:xiqin_dev_2024}
+    # 支持两种方式：Docker Compose用SPRING_DATASOURCE_URL，Render用DB_HOST/DB_PORT/DB_NAME逐属性注入
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:xiqin}}
+    username: ${SPRING_DATASOURCE_USERNAME:${DB_USERNAME:xiqin}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD:xiqin_dev_2024}}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 20
@@ -21,8 +22,6 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-    # 旧部署已经人工执行到 V4；首次接入 Flyway 时从 V4 建立基线，随后执行 V5。
-    # 全新空库不会建立基线，仍会从 V1 完整初始化。
     baseline-on-migrate: true
     baseline-version: 4
 
@@ -88,13 +87,9 @@ app:
     admin-password: ${INITIAL_ADMIN_PASSWORD:admin@xiqin2024}
     admin-email: ${INITIAL_ADMIN_EMAIL:admin@xiqin.local}
 
-  # OnlyOffice 在线编辑
   office:
-    # 后端基址（OnlyOffice 容器回调/拉取文件可达，需为容器网络内地址）
     base-url: ${OFFICE_BASE_URL:http://backend:8080}
-    # OnlyOffice Document Server 对外地址（前端加载 JS API 用）
     server-url: ${OFFICE_SERVER_URL:http://127.0.0.1:8089}
-    # 必须与 Document Server 使用同一个随机密钥
     jwt-secret: ${OFFICE_JWT_SECRET:change-me-to-a-32-byte-onlyoffice-secret}
 
 logging:
