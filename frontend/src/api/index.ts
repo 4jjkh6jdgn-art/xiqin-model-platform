@@ -7,9 +7,10 @@ import { ElMessage } from 'element-plus'
 const rawBase = import.meta.env.VITE_API_BASE_URL as string | undefined
 let apiBaseUrl = '/api'
 if (rawBase && rawBase.trim()) {
-  const trimmed = rawBase.trim()
+  const trimmed = rawBase.trim().replace(/\/+$/, '')
   if (trimmed.startsWith('http')) {
-    apiBaseUrl = trimmed
+    // 完整URL：确保以 /api 结尾（后端 context-path 为 /api）
+    apiBaseUrl = trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`
   } else {
     apiBaseUrl = `https://${trimmed}/api`
   }
