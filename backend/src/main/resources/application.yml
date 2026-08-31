@@ -11,7 +11,7 @@ spring:
 
   datasource:
     # 支持两种方式：Docker Compose用SPRING_DATASOURCE_URL，Render用DB_HOST/DB_PORT/DB_NAME逐属性注入
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:xiqin}}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:xiqin}?sslmode=require}
     username: ${SPRING_DATASOURCE_USERNAME:${DB_USERNAME:xiqin}}
     password: ${SPRING_DATASOURCE_PASSWORD:${DB_PASSWORD:xiqin_dev_2024}}
     driver-class-name: org.postgresql.Driver
